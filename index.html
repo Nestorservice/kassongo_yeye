@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Kassongo Run — Help the Warthog escape the Lion across the African savannah!">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐗</text></svg>">
+    <title>Kassongo Run</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-day">
+
+    <!-- LOADING -->
+    <div id="screen-loading" class="screen active">
+        <div class="loading-container">
+            <h1 class="loading-title">Kassongo Run</h1>
+            <div class="loading-bar-track">
+                <div id="loading-bar-fill" class="loading-bar-fill"></div>
+            </div>
+            <p id="loading-text" class="loading-text">Loading… 0%</p>
+        </div>
+    </div>
+
+    <!-- MENU -->
+    <div id="screen-menu" class="screen">
+        <div class="menu-container">
+            <h1 class="menu-title">Kassongo<br><span class="menu-title-accent">Run</span></h1>
+            <div class="menu-subtitle">🐗 The Warthog's Escape 🦁</div>
+            <p id="menu-weather" class="menu-weather">🌙 Night</p>
+            <p id="menu-best-score" class="menu-best-score">Best: 00000</p>
+            <button id="btn-play" class="btn btn-play">▶ PLAY</button>
+            <button id="btn-mute" class="btn btn-mute">🔊 Sound ON</button>
+            <p class="menu-hint">Tap to jump obstacles • Tap in air to boost! 🦁</p>
+        </div>
+    </div>
+
+    <!-- GAME -->
+    <div id="screen-game" class="screen">
+        <canvas id="game-canvas"></canvas>
+        <canvas id="rain-canvas"></canvas>
+        <div id="game-hud" class="game-hud">
+            <div class="hud-left">
+                <div id="hud-score" class="hud-score">00000</div>
+                <div id="hud-weather" class="hud-weather">🌙 Night</div>
+            </div>
+            <div class="hud-center">
+                <div class="hud-gap-label">DISTANCE</div>
+                <div class="hud-gap-track">
+                    <div id="hud-gap-fill" class="hud-gap-fill"></div>
+                </div>
+            </div>
+            <div id="hud-best" class="hud-best">HI 00000</div>
+        </div>
+    </div>
+
+    <!-- GAME OVER -->
+    <div id="screen-gameover" class="screen">
+        <div class="gameover-overlay">
+            <div class="gameover-card">
+                <h2 class="gameover-title">🦁 CAUGHT!</h2>
+                <p class="gameover-flavor">The lion caught the warthog…</p>
+                <div class="gameover-scores">
+                    <p class="gameover-score-label">Score</p>
+                    <p id="gameover-score" class="gameover-score-value">00000</p>
+                    <p class="gameover-score-label">Best</p>
+                    <p id="gameover-best" class="gameover-best-value">00000</p>
+                </div>
+                <button id="btn-retry" class="btn btn-retry">↻ RETRY</button>
+                <button id="btn-menu" class="btn btn-menu-back">☰ MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WIN -->
+    <div id="screen-win" class="screen">
+        <div class="win-overlay">
+            <div class="win-card">
+                <h2 class="win-title">🐗 SAFE!</h2>
+                <p class="win-flavor">The warthog reached its cave!</p>
+                <div class="win-scores">
+                    <p class="win-score-label">Score</p>
+                    <p id="win-score" class="win-score-value">00000</p>
+                </div>
+                <button id="btn-menu-win" class="btn btn-play">☰ MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="game.js"></script>
+</body>
+</html>
