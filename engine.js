@@ -2,8 +2,8 @@
 
 export const CONFIG = {
     WEATHER_API_KEY: 'e19f5f4ce30ec1034569ca385306561d', 
-    GRAVITY: 0.48,
-    JUMP_FORCE: -16,
+    GRAVITY: 0.52,
+    JUMP_FORCE: -13,
     BASE_SCROLL: 3,
     MAX_SCROLL: 8,
     GROUND_RATIO: 0.8,
@@ -163,6 +163,11 @@ export class EnvironmentManager {
                 const condition = data.weather[0].main.toLowerCase();
                 this._isRaining = condition.includes('rain') || condition.includes('drizzle') || condition.includes('thunderstorm');
             }
+            // Utiliser les heures exactes de lever/coucher du soleil pour la position du joueur
+            if (data.sys && data.sys.sunrise && data.sys.sunset) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                this._isDay = nowSec >= data.sys.sunrise && nowSec <= data.sys.sunset;
+            }
         } catch (e) {
             console.error('Weather fetch error', e);
         }
@@ -213,14 +218,14 @@ export class BackgroundRenderer {
 
 export class Warthog {
     constructor(cw, ch) {
-        this.scale = 0.45;
+        this.scale = 0.38;
         this.frameWidth = 271.5;
         this.frameHeight = 724;
         this.width = this.frameWidth * this.scale;
         this.height = this.frameHeight * this.scale;
         this.yOffset = this.height * 0.65; // Larger offset to compensate for the tall sprite frame
 
-        this.x = cw * 0.65; // Place warthog on the right side of the screen
+        this.x = Warthog.calcX(cw);
         this.baseY = ch * CONFIG.GROUND_RATIO - this.height + this.yOffset;
         this.y = this.baseY;
 
@@ -232,7 +237,14 @@ export class Warthog {
         this.maxFrames = 6;
     }
 
+    static calcX(cw) {
+        if (cw < 600) return cw * 0.20;                    // Mobile: 20% depuis la gauche, 80% visible à droite
+        if (cw < 900) return cw * 0.38;                    // Tablette
+        return cw - Math.max(250, cw * 0.38);              // Desktop
+    }
+
     resize(cw, ch) {
+        this.x = Warthog.calcX(cw);
         this.baseY = ch * CONFIG.GROUND_RATIO - this.height + this.yOffset;
         if (!this.isJumping) this.y = this.baseY;
     }
@@ -382,23 +394,27 @@ export class ObstacleManager {
     }
 
     _spawn(cw, ch) {
-        if (this._obstacles.length > 0 && this._obstacles[this._obstacles.length - 1].x > cw * 0.75) return;
+        if (this._obstacles.length > 0 && this._obstacles[this._obstacles.length - 1].x > cw) return;
         const type = this._types[Math.floor(Math.random() * this._types.length)];
         const groundY = ch * CONFIG.GROUND_RATIO;
-        const h = ch * (0.10 + Math.random() * 0.06);
-        const w = h * (0.65 + Math.random() * 0.35);
-        this._obstacles.push({ type, x: cw + 20, y: groundY - h, w, h });
+        const h = ch * (0.09 + Math.random() * 0.05);
+        const w = h * (0.50 + Math.random() * 0.28);
+        // Décalage vers le bas pour que l'obstacle touche visuellement le sol
+        const sinkY = ch * 0.04;
+        const spawnX = cw + Math.max(80, cw * 0.4);
+        this._obstacles.push({ type, x: spawnX, y: groundY - h + sinkY, w, h });
     }
 
     checkCollision(warthog) {
-        // Narrow hitbox: center 44% of sprite width, top 28% of height (actual animal body)
         const wx1 = warthog.x + warthog.width * 0.28;
         const wx2 = warthog.x + warthog.width * 0.72;
         const wy1 = warthog.y;
         const wy2 = warthog.y + warthog.height * 0.28;
         for (const obs of this._obstacles) {
-            // Only check central 70% of obstacle width to forgive clipping on edges
-            if (wx1 < obs.x + obs.w * 0.85 && wx2 > obs.x + obs.w * 0.15 &&
+            // En saut : seule la moitié avant (droite) de l'obstacle peut toucher.
+            // Une fois le centre de l'obstacle dépassé, le saut est réussi.
+            const obsRightEdge = warthog.isJumping ? obs.x + obs.w * 0.5 : obs.x + obs.w * 0.85;
+            if (wx1 < obsRightEdge && wx2 > obs.x + obs.w * 0.15 &&
                 wy1 < obs.y + obs.h * 0.9 && wy2 > obs.y) {
                 return true;
             }
