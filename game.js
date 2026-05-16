@@ -4,8 +4,8 @@
    ═══════════════════════════════════════════════════════════════ */
 
 import {
-    CONFIG, AssetLoader, EnvironmentManager, BackgroundRenderer,
-    Warthog, ChaseLion, ObstacleManager, RainSystem, ScoreManager, AudioManager
+    CONFIG, AssetLoader, EnvironmentManager, BackgroundRenderer, WeatherRenderer,
+    Warthog, ChaseLion, ObstacleManager, DustSystem, RainSystem, ScoreManager, AudioManager
 } from './engine.js';
 
 const STATE = { LOADING: 0, MENU: 1, PLAYING: 2, CAVE_TRANSITION: 3, GAMEOVER: 4, WIN: 5 };
@@ -18,9 +18,11 @@ class Game {
         this._assets = new AssetLoader();
         this._env = new EnvironmentManager();
         this._bg = null;
+        this._weather = null;
         this._warthog = null;
         this._lion = null;
         this._obstacles = null;
+        this._dust = null;
         this._rain = new RainSystem();
         this._score = new ScoreManager();
         this._audio = null;
@@ -68,9 +70,12 @@ class Game {
         this._audio = new AudioManager(this._assets);
         try { await this._env.init(); } catch (e) {}
         this._bg.setMode(this._env.isDay());
+        this._weather = new WeatherRenderer();
+        this._weather.setup(this._env.isDay(), this._env.isSunny(), this._env.isCloudy(), this._canvas.width, this._canvas.height);
         if (this._env.isRaining()) this._rain.activate(this._canvas.width, this._canvas.height);
-        if (this._els.menuWeather) this._els.menuWeather.textContent = this._env.getWeatherText();
-        if (this._els.hudWeather) this._els.hudWeather.textContent = this._env.getWeatherText();
+        const weatherTxt = this._env.getWeatherText();
+        if (this._els.menuWeather) this._els.menuWeather.textContent = weatherTxt;
+        if (this._els.hudWeather)  this._els.hudWeather.textContent  = weatherTxt;
         this._showScreen('menu');
         this._updateMenuBest();
     }
@@ -86,6 +91,7 @@ class Game {
         this._canvas.width = w;
         this._canvas.height = h;
         this._rain.resize(w, h);
+        if (this._weather) this._weather.setup(this._env.isDay(), this._env.isSunny(), this._env.isCloudy(), w, h);
         if (this._warthog) this._warthog.resize(w, h);
         if (this._lion) this._lion.resize(h);
     }
@@ -93,8 +99,10 @@ class Game {
     _setupResize() { window.addEventListener('resize', () => this._resizeCanvas()); }
 
     _setupInput() {
+        /* Mouse / stylus: tap = jump or boost */
         this._canvas.addEventListener('pointerdown', (e) => {
             e.preventDefault();
+            if (e.pointerType === 'touch') return; // handled by touchstart/touchend below
             if (this._state === STATE.PLAYING && this._warthog) {
                 if (!this._warthog.isJumping) {
                     this._warthog.jump();
@@ -103,14 +111,40 @@ class Game {
                 }
             }
         });
+
+        /* Touch: tap = jump/boost, swipe down = roll */
+        let _touchStartY = 0;
+        this._canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            _touchStartY = e.touches[0].clientY;
+        }, { passive: false });
+        this._canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            const dy = e.changedTouches[0].clientY - _touchStartY;
+            if (this._state === STATE.PLAYING && this._warthog) {
+                if (dy > 45) {
+                    this._warthog.roll();
+                } else if (!this._warthog.isJumping) {
+                    this._warthog.jump();
+                } else {
+                    this._warthog.accelerate();
+                }
+            }
+        }, { passive: false });
+
         document.addEventListener('keydown', (e) => {
-            if ((e.code === 'Space' || e.code === 'ArrowUp') && this._state === STATE.PLAYING && this._warthog) {
+            if (this._state !== STATE.PLAYING || !this._warthog) return;
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
                 e.preventDefault();
                 if (!this._warthog.isJumping) {
                     this._warthog.jump();
                 } else {
                     this._warthog.accelerate();
                 }
+            }
+            if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                this._warthog.roll();
             }
         });
         if (this._els.btnPlay) this._els.btnPlay.addEventListener('click', () => this._start());
@@ -148,6 +182,7 @@ class Game {
         this._warthog = new Warthog(this._canvas.width, this._canvas.height);
         this._lion = new ChaseLion(this._canvas.width, this._canvas.height);
         this._obstacles = new ObstacleManager();
+        this._dust = new DustSystem();
         if (this._audio) this._audio.start();
         this._showScreen('game');
         if (this._animId) cancelAnimationFrame(this._animId);
@@ -173,12 +208,24 @@ class Game {
             this._scrollSpeed = Math.min(this._scrollSpeed, CONFIG.MAX_SCROLL);
             /* Update everything */
             this._bg.update(this._scrollSpeed * dtF);
+            if (this._weather) this._weather.update(this._canvas.width, this._canvas.height);
             this._warthog.update();
             this._lion.update(this._lionSpeed);
             this._lion.updatePosition(this._warthog.x, this._gap);
             this._obstacles.update(this._scrollSpeed, this._canvas.width, this._canvas.height);
             this._rain.update();
             this._score.update();
+            /* Poussière sous les pattes quand le warthog court au sol */
+            if (this._dust) {
+                if (!this._warthog.isJumping) {
+                    this._dust.emit(this._warthog.x, this._warthog.y, this._warthog.width, this._warthog.height, this._scrollSpeed);
+                }
+                /* Poussière du lion lorsqu'il est visible à l'écran */
+                if (this._lion && this._lion.x + this._lion.width > 0) {
+                    this._dust.emit(this._lion.x, this._lion.y, this._lion.width, this._lion.height, this._scrollSpeed + 2);
+                }
+                this._dust.update();
+            }
             /* Danger flash when lion is close */
             const dangerRatio = 1 - Math.min(this._gap / (this._canvas.width * 0.3), 1);
             this._dangerFlash = dangerRatio;
@@ -212,6 +259,13 @@ class Game {
         const w = this._canvas.width, h = this._canvas.height;
         ctx.clearRect(0, 0, w, h);
         this._bg.draw(ctx, w, h);
+        /* Atmosphère sombre quand il pleut */
+        if (this._rain && this._rain.active) {
+            ctx.fillStyle = 'rgba(20,40,70,0.22)';
+            ctx.fillRect(0, 0, w, h);
+        }
+        /* Météo : soleil / lune / nuages */
+        if (this._weather) this._weather.draw(ctx, w, h);
         /* Ground overlay */
         const groundY = h * CONFIG.GROUND_RATIO;
         ctx.fillStyle = 'rgba(80, 50, 20, 0.25)';
@@ -221,6 +275,22 @@ class Game {
         if (this._lion) this._lion.draw(ctx, lionSheet);
         /* Obstacles */
         if (this._obstacles) this._obstacles.draw(ctx, this._assets);
+        /* Poussière (devant obstacles, derrière warthog) */
+        if (this._dust) this._dust.draw(ctx);
+        /* Halo solaire autour du warthog quand il fait beau */
+        if (this._warthog && this._env.isDay() && this._env.isSunny()) {
+            const cx  = this._warthog.x + this._warthog.width * 0.5;
+            const cy  = this._warthog.y + this._warthog.height * 0.15;
+            const r   = this._warthog.width * 0.9;
+            const pulse = 0.10 + Math.sin(Date.now() * 0.0025) * 0.04;
+            const grd = ctx.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+            grd.addColorStop(0, `rgba(255,220,60,${pulse})`);
+            grd.addColorStop(1, 'rgba(255,160,0,0)');
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
         /* Warthog */
         const warthogSheet = this._assets.get('warthog_sheet');
         if (this._warthog) this._warthog.draw(ctx, warthogSheet);
@@ -257,8 +327,9 @@ class Game {
     }
 
     _updateHUD() {
-        if (this._els.hudScore) this._els.hudScore.textContent = this._score.format(this._score.current);
-        if (this._els.hudBest) this._els.hudBest.textContent = 'HI ' + this._score.format(this._score.best);
+        if (this._els.hudScore)   this._els.hudScore.textContent  = this._score.format(this._score.current);
+        if (this._els.hudBest)    this._els.hudBest.textContent   = 'HI ' + this._score.format(this._score.best);
+        if (this._els.hudWeather) this._els.hudWeather.textContent = this._env.getWeatherText();
         /* Gap bar */
         if (this._els.hudGap) {
             const maxGap = this._canvas.width * CONFIG.GAP_START_RATIO;

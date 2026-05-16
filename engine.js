@@ -131,25 +131,41 @@ export class EnvironmentManager {
     constructor() {
         this._isDay = true;
         this._isRaining = false;
+        this._isCloudy = false;
+        this._isSunny = false;
         this._temp = 25;
     }
 
     async init() {
         const hour = new Date().getHours();
         this._isDay = (hour >= 6 && hour < 19);
+        this._isSunny = this._isDay;
 
+        let lat = null, lon = null;
+
+        // 1. Essayer la géolocalisation GPS
         try {
             const pos = await this._getPosition();
-            await this._fetchWeather(pos.coords.latitude, pos.coords.longitude);
-        } catch (e) {
-            console.log("Using default weather/time data.");
+            lat = pos.coords.latitude;
+            lon = pos.coords.longitude;
+        } catch (_) {
+            // 2. Fallback : géolocalisation par adresse IP (aucune permission requise)
+            try {
+                const res = await fetch('https://ip-api.com/json/');
+                const d = await res.json();
+                if (d.status === 'success') { lat = d.lat; lon = d.lon; }
+            } catch (_2) {}
+        }
+
+        if (lat !== null && lon !== null) {
+            await this._fetchWeather(lat, lon);
         }
     }
 
     _getPosition() {
         return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 });
+            if (!navigator.geolocation) return reject(new Error('no geolocation'));
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 });
         });
     }
 
@@ -160,25 +176,174 @@ export class EnvironmentManager {
             const data = await res.json();
             if (data.main) this._temp = Math.round(data.main.temp);
             if (data.weather && data.weather.length > 0) {
-                const condition = data.weather[0].main.toLowerCase();
-                this._isRaining = condition.includes('rain') || condition.includes('drizzle') || condition.includes('thunderstorm');
+                const m = data.weather[0].main.toLowerCase();
+                this._isRaining = m === 'rain' || m === 'drizzle' || m === 'thunderstorm';
+                this._isCloudy  = m === 'clouds' || m === 'atmosphere' || this._isRaining;
+                this._isSunny   = m === 'clear';
             }
-            // Utiliser les heures exactes de lever/coucher du soleil pour la position du joueur
+            // Lever/coucher du soleil astronomique exact pour la localisation
             if (data.sys && data.sys.sunrise && data.sys.sunset) {
-                const nowSec = Math.floor(Date.now() / 1000);
-                this._isDay = nowSec >= data.sys.sunrise && nowSec <= data.sys.sunset;
+                const now = Math.floor(Date.now() / 1000);
+                this._isDay = now >= data.sys.sunrise && now <= data.sys.sunset;
             }
         } catch (e) {
             console.error('Weather fetch error', e);
         }
     }
 
-    isDay() { return this._isDay; }
-    isRaining() { return this._isRaining; }
+    isDay()      { return this._isDay; }
+    isRaining()  { return this._isRaining; }
+    isCloudy()   { return this._isCloudy; }
+    isSunny()    { return this._isSunny; }
+
     getWeatherText() {
-        const tod = this._isDay ? '☀️ Day' : '🌙 Night';
-        const weather = this._isRaining ? '🌧️ Rain' : '⛅ Clear';
-        return `${tod} | ${weather} | ${this._temp}°C`;
+        const tod  = this._isDay ? '☀️' : '🌙';
+        const rain = this._isRaining ? '🌧️' : '';
+        const cld  = (!this._isRaining && this._isCloudy) ? '☁️' : '';
+        return `${tod}${rain}${cld} ${this._temp}°C`;
+    }
+}
+
+export class WeatherRenderer {
+    constructor() {
+        this._isDay    = true;
+        this._isSunny  = false;
+        this._isCloudy = false;
+        this._clouds   = [];
+        this._tick     = 0;
+    }
+
+    setup(isDay, isSunny, isCloudy, cw, ch) {
+        this._isDay    = isDay;
+        this._isSunny  = isSunny;
+        this._isCloudy = isCloudy;
+        this._clouds   = [];
+        // Nombre de nuages selon la météo
+        const count = isCloudy ? 6 : 2;
+        for (let i = 0; i < count; i++) {
+            this._clouds.push({
+                x:     Math.random() * cw,
+                y:     ch * (0.04 + Math.random() * 0.16),
+                scale: 0.5 + Math.random() * 0.9,
+                speed: 0.15 + Math.random() * 0.25,
+                alpha: isCloudy ? (0.70 + Math.random() * 0.30) : (0.18 + Math.random() * 0.14),
+                cw, ch,
+            });
+        }
+    }
+
+    update(cw, ch) {
+        this._tick++;
+        for (const c of this._clouds) {
+            c.x -= c.speed;
+            if (c.x + c.scale * 160 < 0) {
+                c.x = cw + 20;
+                c.y = ch * (0.04 + Math.random() * 0.16);
+            }
+        }
+    }
+
+    draw(ctx, cw, ch) {
+        if (this._isDay)  this._drawSun(ctx, cw, ch);
+        if (!this._isDay) this._drawMoon(ctx, cw, ch);
+        for (const c of this._clouds) this._drawCloud(ctx, c.x, c.y, c.scale, c.alpha);
+    }
+
+    _drawSun(ctx, cw, ch) {
+        const x = cw * 0.82, y = ch * 0.10;
+        const r = Math.min(cw, ch) * 0.052;
+        const t = this._tick * 0.012;
+
+        // Halo
+        const grd = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 3.2);
+        grd.addColorStop(0, 'rgba(255,230,80,0.40)');
+        grd.addColorStop(1, 'rgba(255,200,0,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 3.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Rayons
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(t);
+        ctx.strokeStyle = 'rgba(255,215,60,0.55)';
+        ctx.lineWidth = Math.max(2, r * 0.13);
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * r * 1.3, Math.sin(a) * r * 1.3);
+            ctx.lineTo(Math.cos(a) * r * 2.0, Math.sin(a) * r * 2.0);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // Disque solaire
+        ctx.fillStyle = '#FFE040';
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        // Reflet
+        ctx.fillStyle = 'rgba(255,255,200,0.55)';
+        ctx.beginPath();
+        ctx.arc(x - r * 0.28, y - r * 0.28, r * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    _drawMoon(ctx, cw, ch) {
+        const x = cw * 0.14, y = ch * 0.10;
+        const r = Math.min(cw, ch) * 0.042;
+
+        // Étoiles
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        const stars = [[0.55,0.06],[0.72,0.04],[0.38,0.13],[0.85,0.11],[0.62,0.15],[0.25,0.07]];
+        for (const [sx, sy] of stars) {
+            const sr = 1.2 + Math.sin(this._tick * 0.04 + sx * 12) * 0.7;
+            ctx.beginPath();
+            ctx.arc(cw * sx, ch * sy, sr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Halo lune
+        const grd = ctx.createRadialGradient(x, y, r * 0.2, x, y, r * 2.8);
+        grd.addColorStop(0, 'rgba(200,220,255,0.28)');
+        grd.addColorStop(1, 'rgba(100,140,255,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 2.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Croissant de lune
+        ctx.fillStyle = '#DDE8F8';
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        // Masque pour créer le croissant
+        ctx.fillStyle = '#0d1b3e';
+        ctx.beginPath();
+        ctx.arc(x + r * 0.42, y - r * 0.08, r * 0.80, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    _drawCloud(ctx, x, y, scale, alpha) {
+        const w = 130 * scale;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#ffffff';
+        const parts = [
+            [0.50, 0.68, 0.30],
+            [0.24, 0.74, 0.21],
+            [0.76, 0.74, 0.20],
+            [0.38, 0.42, 0.23],
+            [0.65, 0.40, 0.19],
+        ];
+        for (const [cx, cy, cr] of parts) {
+            ctx.beginPath();
+            ctx.arc(x + w * cx, y + w * cy * 0.55, w * cr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
     }
 }
 
@@ -232,6 +397,9 @@ export class Warthog {
         this.boost = 0;
         this.vy = 0;
         this.isJumping = false;
+        this.isRolling = false;
+        this._rollTimer = 0;
+        this._rollDuration = 42;
         this.frameTimer = 0;
         this.frame = 0;
         this.maxFrames = 6;
@@ -261,6 +429,13 @@ export class Warthog {
         }
     }
 
+    roll() {
+        if (!this.isJumping && !this.isRolling) {
+            this.isRolling = true;
+            this._rollTimer = 0;
+        }
+    }
+
     update() {
         this.boost *= CONFIG.BOOST_DECAY;
         if (this.boost < 0.1) this.boost = 0;
@@ -272,6 +447,14 @@ export class Warthog {
                 this.y = this.baseY;
                 this.vy = 0;
                 this.isJumping = false;
+            }
+        }
+
+        if (this.isRolling) {
+            this._rollTimer++;
+            if (this._rollTimer >= this._rollDuration) {
+                this.isRolling = false;
+                this._rollTimer = 0;
             }
         }
 
@@ -298,6 +481,25 @@ export class Warthog {
             ctx.ellipse(this.x + this.width * 0.5, groundY + 4, rx, ry, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
+        }
+
+        if (this.isRolling) {
+            const progress = this._rollTimer / this._rollDuration;
+            const angle = progress * Math.PI * 2.5;
+            const cx = this.x + this.width * 0.5;
+            const cy = this.y + this.height * 0.5;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(angle);
+            if (sheet) {
+                ctx.drawImage(sheet, this.frame * this.frameWidth, 0, this.frameWidth, this.frameHeight,
+                    -this.width * 0.5, -this.height * 0.5, this.width, this.height);
+            } else {
+                ctx.fillStyle = '#ff8800';
+                ctx.fillRect(-this.width * 0.5, -this.height * 0.5, this.width, this.height);
+            }
+            ctx.restore();
+            return;
         }
 
         if (!sheet) {
@@ -435,63 +637,144 @@ export class ObstacleManager {
     }
 }
 
+export class DustSystem {
+    constructor() { this._particles = []; }
+
+    reset() { this._particles = []; }
+
+    emit(wx, wy, ww, wh, scrollSpeed) {
+        if (!this._particles.length < 200 && Math.random() > 0.8) return;
+        const rate = Math.min(0.75, 0.25 + scrollSpeed * 0.06);
+        if (Math.random() > rate) return;
+        const count = 1 + Math.floor(scrollSpeed * 0.15);
+        for (let i = 0; i < count; i++) {
+            this._particles.push({
+                x:    wx + ww * (0.05 + Math.random() * 0.30),
+                y:    wy + wh * 0.33 + Math.random() * 5,
+                vx:   -(0.4 + Math.random() * 2.8),
+                vy:   -(0.1 + Math.random() * 1.0),
+                life: 1.0,
+                r:    2.5 + Math.random() * 5.5,
+            });
+        }
+    }
+
+    update() {
+        for (let i = this._particles.length - 1; i >= 0; i--) {
+            const p = this._particles[i];
+            p.x   += p.vx;
+            p.y   += p.vy;
+            p.vy  += 0.055;
+            p.vx  *= 0.95;
+            p.r   += 0.25;
+            p.life -= 0.032;
+            if (p.life <= 0) this._particles.splice(i, 1);
+        }
+    }
+
+    draw(ctx) {
+        for (const p of this._particles) {
+            ctx.save();
+            ctx.globalAlpha = p.life * 0.50;
+            ctx.fillStyle = '#c4a45e';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+}
+
 export class RainSystem {
     constructor() {
         this.active = false;
-        this.drops = [];
+        this.drops  = [];
         this.canvas = document.getElementById('rain-canvas');
         if (this.canvas) this.ctx = this.canvas.getContext('2d');
     }
 
+    _newDrop(w, h, randomY) {
+        const vy = 11 + Math.random() * 13;
+        return {
+            x:       Math.random() * (w + 100) - 50,
+            y:       randomY ? Math.random() * h : -25,
+            vy,
+            vx:      -1.5 - Math.random() * 1.2,
+            l:       16 + Math.random() * 20,
+            lw:      0.8 + Math.random() * 1.3,
+            alpha:   0.55 + Math.random() * 0.40,
+            splash:  0,
+            splashX: 0,
+        };
+    }
+
     activate(w, h) {
         this.active = true;
+        this.drops  = [];
         if (this.canvas) {
             this.canvas.classList.add('rain-active');
             this.resize(w, h);
-            for (let i = 0; i < 150; i++) {
-                this.drops.push({
-                    x: Math.random() * w,
-                    y: Math.random() * h,
-                    s: Math.random() * 4 + 4,
-                    l: Math.random() * 20 + 10
-                });
+            for (let i = 0; i < 300; i++) {
+                this.drops.push(this._newDrop(w, h, true));
             }
         }
     }
 
     resize(w, h) {
         if (this.canvas) {
-            this.canvas.width = w;
+            this.canvas.width  = w;
             this.canvas.height = h;
         }
     }
 
     update() {
         if (!this.active || !this.canvas) return;
-        const h = this.canvas.height;
+        const w = this.canvas.width, h = this.canvas.height;
+        const groundY = h * CONFIG.GROUND_RATIO;
         for (let i = 0; i < this.drops.length; i++) {
-            let d = this.drops[i];
-            d.y += d.s * 2;
-            d.x -= 2;
-            if (d.y > h) {
-                d.y = -20;
-                d.x = Math.random() * this.canvas.width;
+            const d = this.drops[i];
+            if (d.splash > 0) {
+                d.splash -= 0.10;
+                if (d.splash <= 0) this.drops[i] = this._newDrop(w, h, false);
+                continue;
             }
+            d.y += d.vy;
+            d.x += d.vx;
+            if (d.y >= groundY) {
+                d.splash  = 1.0;
+                d.splashX = d.x;
+            }
+            if (d.x < -60) d.x = w + 40;
         }
     }
 
     draw() {
         if (!this.active || !this.ctx) return;
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        this.ctx.lineWidth = 1.5;
-        this.ctx.beginPath();
-        for (let i = 0; i < this.drops.length; i++) {
-            let d = this.drops[i];
-            this.ctx.moveTo(d.x, d.y);
-            this.ctx.lineTo(d.x - 2, d.y + d.l);
+        const w = this.canvas.width, h = this.canvas.height;
+        const groundY = h * CONFIG.GROUND_RATIO;
+        this.ctx.clearRect(0, 0, w, h);
+        this.ctx.lineCap = 'round';
+
+        for (const d of this.drops) {
+            if (d.splash > 0) {
+                // Arc de rebond au sol
+                this.ctx.strokeStyle = `rgba(160,210,240,${d.splash * 0.60})`;
+                this.ctx.lineWidth   = 0.9;
+                this.ctx.beginPath();
+                this.ctx.ellipse(d.splashX, groundY, d.splash * 8, d.splash * 3, 0, Math.PI, 0, false);
+                this.ctx.stroke();
+            } else {
+                // Goutte diagonale
+                const ex = d.x + (d.vx / d.vy) * d.l;
+                const ey = d.y + d.l;
+                this.ctx.strokeStyle = `rgba(160,210,240,${d.alpha})`;
+                this.ctx.lineWidth   = d.lw;
+                this.ctx.beginPath();
+                this.ctx.moveTo(d.x, d.y);
+                this.ctx.lineTo(ex, ey);
+                this.ctx.stroke();
+            }
         }
-        this.ctx.stroke();
     }
 }
 

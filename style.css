@@ -106,7 +106,7 @@ body.theme-night { background-color: #0d0d2b; }
 #game-canvas { display: block; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 #rain-canvas {
     display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0;
-    z-index: 6; pointer-events: none; opacity: 0.6;
+    z-index: 6; pointer-events: none; opacity: 1;
 }
 #rain-canvas.rain-active { display: block; }
 
